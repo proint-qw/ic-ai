@@ -3,49 +3,30 @@ import os
 from langchain.memory import ConversationBufferMemory
 from utils import qa_agent
 
-st.title("📑 芯片制造知识库AI助手")
+st.title("🧠 芯片制造知识库智能助手")
 
 with st.sidebar:
-    st.header("配置设置")
-
-    # 环境变量密钥
-    env_key = os.getenv("OPENAI_API_KEY", "")
-
-    # 用户密钥输入
-    openai_api_key = st.text_input(
-        "OpenAI API密钥：",
-        type="password",
-        value=env_key,
-        help="管理员已配置密钥时可留空" if env_key else None
-    )
-
     # 模型选择
-    model_name = st.selectbox(
-        "选择AI模型：",
-        ["gpt-3.5-turbo", "gpt-4"],
+    selected_model = st.selectbox(
+        "选择AI模型",
+        ("gpt-3.5-turbo", "gpt-4"),
         index=0
     )
 
-    # API基地址
-    api_base = st.text_input(
-        "API基地址（可选）：",
-        value=os.getenv("OPENAI_API_BASE", "https://api.aigc369.com/v1"),
-        help="默认使用课程提供的API地址"
-    )
-
-    if env_key:
-        st.info("ℹ️ 检测到预配置密钥，输入框可留空直接使用")
-    st.markdown("[获取API密钥](https://platform.openai.com/account/api-keys)")
-
-# 密钥验证
-if not openai_api_key:
-    if env_key:
-        openai_api_key = env_key
+    # API密钥处理
+    env_api_key = os.getenv("COURSE_API_KEY")
+    if env_api_key:
+        use_env_key = st.checkbox("使用环境变量API密钥", value=True)
+        if use_env_key:
+            openai_api_key = env_api_key
+        else:
+            openai_api_key = st.text_input("自定义API密钥：", type="password")
     else:
-        st.error("❌ 需要提供OpenAI API密钥（输入或环境变量）")
-        st.stop()
+        openai_api_key = st.text_input("请输入API密钥：", type="password")
 
-# 初始化会话内存
+    st.markdown("[API密钥获取指南](https://platform.openai.com/account/api-keys)")
+
+# 初始化对话记忆
 if "memory" not in st.session_state:
     st.session_state["memory"] = ConversationBufferMemory(
         return_messages=True,
@@ -53,31 +34,41 @@ if "memory" not in st.session_state:
         output_key="answer"
     )
 
-# 文件上传和提问
-uploaded_file = st.file_uploader("上传芯片制造相关PDF文档", type="pdf")
-question = st.text_input("请输入技术问题", disabled=not uploaded_file)
+# 文件上传
+uploaded_file = st.file_uploader("上传芯片制造技术文档（PDF）", type="pdf")
+question = st.text_input("请输入您的问题", disabled=not uploaded_file)
 
+# 处理问答流程
 if uploaded_file and question:
-    with st.spinner("AI分析中..."):
-        response = qa_agent(
-            openai_api_key,
-            st.session_state["memory"],
-            uploaded_file,
-            question,
-            model_name,
-            api_base
-        )
-    st.write("### 专家解答")
-    st.write(response["answer"])
-    st.session_state["chat_history"] = response["chat_history"]
+    if not openai_api_key:
+        st.warning("⚠️ 请输入有效的API密钥")
+        st.stop()
 
-# 历史消息展示
+    with st.spinner("正在分析芯片制造文档..."):
+        try:
+            response = qa_agent(
+                openai_api_key=openai_api_key,
+                memory=st.session_state["memory"],
+                uploaded_file=uploaded_file,
+                question=question,
+                model_name=selected_model
+            )
+            st.write("## 专家解答")
+            st.success(response["answer"])
+
+            st.session_state["chat_history"] = response["chat_history"]
+        except Exception as e:
+            st.error(f"芯片知识引擎异常：{str(e)}")
+
+# 显示历史对话
 if "chat_history" in st.session_state:
-    with st.expander("对话历史"):
+    with st.expander("🧾 对话记录"):
         for i in range(0, len(st.session_state["chat_history"]), 2):
-            human = st.session_state["chat_history"][i]
-            ai = st.session_state["chat_history"][i + 1]
-            st.markdown(f"**用户**：{human.content}")
-            st.markdown(f"**AI专家**：{ai.content}")
-            if i < len(st.session_state["chat_history"]) - 2:
-                st.divider()
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                st.markdown("**工程师**")
+                st.write(st.session_state["chat_history"][i].content)
+            with col2:
+                st.markdown("**芯片专家**")
+                st.write(st.session_state["chat_history"][i + 1].content)
+            st.divider()

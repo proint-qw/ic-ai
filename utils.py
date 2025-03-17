@@ -6,52 +6,51 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import os
 
 
-def qa_agent(openai_api_key, memory, uploaded_file, question, model_name, api_base):
-    # 合并密钥来源
-    final_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+def qa_agent(openai_api_key, memory, uploaded_file, question, model_name="gpt-3.5-turbo"):
+    # 优先使用环境变量中的API密钥
+    env_api_key = os.getenv("COURSE_API_KEY")
+    final_api_key = env_api_key or openai_api_key
 
-    # 合并基地址来源
-    final_base = api_base or os.getenv("OPENAI_API_BASE", "https://api.aigc369.com/v1")
-
-    # 初始化模型
-    model = ChatOpenAI(
+    # 初始化大模型
+    llm = ChatOpenAI(
         model=model_name,
-        openai_api_key=final_key,
-        openai_api_base=final_base
+        openai_api_key=final_api_key,
+        openai_api_base="https://api.aigc369.com/v1",  # 课程专用API地址
+        temperature=0.3
     )
 
-    # 初始化Embeddings
-    embeddings = OpenAIEmbeddings(
-        openai_api_key=final_key,
-        openai_api_base=final_base
-    )
-
-    # 处理PDF文件
-    temp_file_path = "temp.pdf"
+    # 处理PDF文档
+    temp_file_path = "temp_doc.pdf"
     with open(temp_file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
-    # 文档处理
+    # 文档分割策略
     loader = PyPDFLoader(temp_file_path)
     docs = loader.load()
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1500,
         chunk_overlap=200,
-        separators=["\n\n", "\n", "。", "！", "？", "；"]
+        separators=["\n\n", "\n", "。", "！", "？", "§"]
     )
     texts = text_splitter.split_documents(docs)
 
-    # 向量数据库
-    db = FAISS.from_documents(texts, embeddings)
-    retriever = db.as_retriever(search_kwargs={"k": 5})
+    # 半导体领域专用向量库
+    embeddings = OpenAIEmbeddings(
+        openai_api_key=final_api_key,
+        openai_api_base="https://api.aigc369.com/v1"
+    )
+    vector_db = FAISS.from_documents(texts, embeddings)
 
-    # 对话链
-    qa = ConversationalRetrievalChain.from_llm(
-        llm=model,
-        retriever=retriever,
+    # 构建问答链
+    qa_chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vector_db.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": 5, "fetch_k": 10}
+        ),
         memory=memory,
-        return_source_documents=True
+        chain_type="stuff",
+        verbose=True
     )
 
-    response = qa.invoke({"question": question})
-    return response
+    return qa_chain.invoke({"question": question})
